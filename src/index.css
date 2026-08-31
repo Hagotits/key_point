@@ -683,6 +683,13 @@ input:focus { border-color: var(--accent); }
   background: rgb(var(--selection-rgb) / 0.08);
 }
 
+.instance-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.instance-actions .btn { min-height: 24px; }
+
 .instance-index {
   display: inline-flex;
   align-items: center;

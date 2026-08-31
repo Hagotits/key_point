@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createHistory } from '../history.js'
+import { duplicateInstance } from '../duplicateInstance.js'
 import { uid, loadImageFiles } from '../utils'
 import SessionAutosave from './SessionAutosave'
 
@@ -1104,20 +1105,37 @@ export default function Labeler({
                 <span className="instance-index">{i + 1}</span>
                 <span>객체 {i + 1}</span>
               </button>
-              <button
-                type="button"
-                className="btn tiny danger"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  commitInstances((cur) => cur.filter((x) => x.id !== inst.id))
-                  if (selectedId === inst.id) {
-                    setSelectedId(null)
+              <span className="instance-actions">
+                <button
+                  type="button"
+                  className="btn tiny"
+                  title={`객체 ${i + 1} 복사`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    const duplicate = duplicateInstance(inst, image, scale)
+                    if (!commitInstances((cur) => [...cur, duplicate])) return
+                    setSelectedId(duplicate.id)
                     setSelectedKp(null)
-                  }
-                }}
-              >
-                삭제
-              </button>
+                    setPlacing(null)
+                  }}
+                >
+                  복사
+                </button>
+                <button
+                  type="button"
+                  className="btn tiny danger"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    commitInstances((cur) => cur.filter((x) => x.id !== inst.id))
+                    if (selectedId === inst.id) {
+                      setSelectedId(null)
+                      setSelectedKp(null)
+                    }
+                  }}
+                >
+                  삭제
+                </button>
+              </span>
             </li>
           ))}
         </ul>
