@@ -738,9 +738,15 @@ export default function Labeler({
             </span>
           ) : (
             <span className="canvas-hint-text">
-              드래그 = 박스 그리기 (시작 지점이 스켈레톤 위쪽) · <b>휠</b> = 줌 ·{' '}
-              <b>Space/휠버튼 드래그</b> = 화면 이동 · 포인트 클릭 후 <b>1</b> 없음 ·{' '}
-              <b>2</b> 가려짐 · <b>3</b> 보임 · <b>V</b> = 순환 · Delete = 포인트 없음 / 박스 삭제
+              <span className="hint-chunk">드래그 = 박스 그리기</span>
+              <span className="hint-chunk">(시작 지점이 스켈레톤 위쪽)</span>
+              <span className="hint-chunk">· <b>휠</b> = 줌</span>
+              <span className="hint-chunk">· <b>Space/휠버튼 드래그</b> = 화면 이동</span>
+              <span className="hint-chunk">· 포인트 클릭 후 <b>1</b> 없음</span>
+              <span className="hint-chunk">· <b>2</b> 가려짐</span>
+              <span className="hint-chunk">· <b>3</b> 보임</span>
+              <span className="hint-chunk">· <b>V</b> = 순환</span>
+              <span className="hint-chunk">· Delete = 포인트 없음 / 박스 삭제</span>
             </span>
           )}
           <div className="history-controls" aria-label="편집 기록">
@@ -1028,8 +1034,31 @@ export default function Labeler({
                           role="radio"
                           className={`visibility-option v${option.value} ${k.v === option.value ? 'active' : ''}`}
                           aria-checked={k.v === option.value}
+                          tabIndex={k.v === option.value ? 0 : -1}
+                          data-visibility-value={option.value}
                           aria-label={`${def.name}: ${option.shortcut} ${V_LABELS[option.value]}`}
                           title={`단축키 ${option.shortcut}: ${V_LABELS[option.value]}`}
+                          onKeyDown={(event) => {
+                            const keys = ['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Home', 'End']
+                            if (!keys.includes(event.key)) return
+                            event.preventDefault()
+                            const currentIndex = VISIBILITY_OPTIONS.findIndex(
+                              (item) => item.value === option.value
+                            )
+                            const nextIndex =
+                              event.key === 'Home'
+                                ? 0
+                                : event.key === 'End'
+                                  ? VISIBILITY_OPTIONS.length - 1
+                                  : (currentIndex + (['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : -1) + VISIBILITY_OPTIONS.length) % VISIBILITY_OPTIONS.length
+                            const nextOption = VISIBILITY_OPTIONS[nextIndex]
+                            const group = event.currentTarget.parentElement
+                            setSelectedKp({ instId: selectedInstance.id, defId: k.defId })
+                            setKpV(selectedInstance.id, k.defId, nextOption.value)
+                            group
+                              ?.querySelector(`[data-visibility-value="${nextOption.value}"]`)
+                              ?.focus()
+                          }}
                           onClick={() => {
                             setSelectedKp({ instId: selectedInstance.id, defId: k.defId })
                             setKpV(selectedInstance.id, k.defId, option.value)

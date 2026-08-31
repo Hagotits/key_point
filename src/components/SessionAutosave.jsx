@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { saveSession } from '../sessionStore'
 import { uid } from '../utils'
 
@@ -20,16 +21,26 @@ export default function SessionAutosave({
   const initialSessionRef = useRef(initialSession)
   const sessionIdRef = useRef(null)
   const createdAtRef = useRef(null)
+  const statusTimerRef = useRef(null)
+  const [status, setStatus] = useState('idle')
 
   const enqueueLatest = useCallback(() => {
     const snapshot = latestRef.current
     latestRef.current = null
     if (!snapshot) return
 
+    setStatus('saving')
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
     queueRef.current = queueRef.current
       .catch(() => {})
       .then(() => saveSession(snapshot))
-      .catch(() => {})
+      .then(
+        () => {
+          setStatus('saved')
+          statusTimerRef.current = setTimeout(() => setStatus('idle'), 1400)
+        },
+        () => setStatus('error')
+      )
   }, [])
 
   useEffect(() => {
@@ -66,8 +77,27 @@ export default function SessionAutosave({
       enqueueLatest()
     }
     window.addEventListener('pagehide', flush)
-    return () => window.removeEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+    }
   }, [enqueueLatest])
 
-  return null
+  if (status === 'idle') return null
+
+  const statusTarget = document.querySelector('.sidebar-header')
+  if (!statusTarget) return null
+
+  return createPortal(
+    <div
+      className={`autosave-status ${status}`}
+      role={status === 'error' ? 'alert' : 'status'}
+      aria-live={status === 'error' ? 'assertive' : 'polite'}
+    >
+      {status === 'saving' && '자동 저장 중…'}
+      {status === 'saved' && '자동 저장됨'}
+      {status === 'error' && '자동 저장 실패 · 페이지를 닫지 마세요'}
+    </div>,
+    statusTarget
+  )
 }

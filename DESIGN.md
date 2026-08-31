@@ -39,12 +39,12 @@ configuration.
 
 | Level | Size | Weight | Line Height | Usage |
 |-------|------|--------|-------------|-------|
-| Title | `22px` | 700 | 1.2 | Project/entry heading |
-| Section | `15px` | 600 | 1.3 | Project name in rail |
-| Body | `14px` | 400 | 1.5 | Controls and rows |
-| Body small | `13px` | 400 | 1.45 | Section labels and legend |
-| Caption | `12px` | 400 | 1.4 | Image names and hints |
-| Micro | `11px` | 600 | 1.3 | Status badges and compact actions |
+| Title | `--font-title` (`22px`) | 700 | 1.2 | Project/entry heading |
+| Section | `--font-section` (`15px`) | 600 | 1.3 | Project name in rail |
+| Body | `--font-body` (`14px`) | 400 | 1.5 | Controls and rows |
+| Body small | `--font-small` (`13px`) | 400 | 1.45 | Section labels and legend |
+| Caption | `--font-caption` (`12px`) | 400 | 1.4 | Image names and hints |
+| Micro | `--font-micro` (`11px`) | 600 | 1.3 | Status badges and compact actions |
 
 ### Font Stack
 
@@ -58,13 +58,18 @@ or above `13px` for task instructions.
 
 ### Base Unit
 
-All spacing derives from a 4px base unit.
+Layout rhythm uses the named spacing scale. Pixel-exact borders, SVG hit
+targets, responsive rail widths, and control geometry are intentional
+exceptions because they encode annotation precision rather than layout rhythm.
 
 | Token | Value | Usage |
 |-------|-------|-------|
 | `--space-1` | `4px` | List gaps and compact separation |
+| `--space-1-5` | `6px` | Dense row gaps |
 | `--space-2` | `8px` | Inline controls and row padding |
+| `--space-2-5` | `10px` | Optical control padding |
 | `--space-3` | `12px` | Panel padding and control groups |
+| `--space-3-5` | `14px` | Dense rail padding |
 | `--space-4` | `16px` | Canvas padding and toolbar rhythm |
 | `--space-6` | `24px` | Centered setup surface |
 | `--space-8` | `32px` | Setup card padding |
@@ -114,7 +119,7 @@ All spacing derives from a 4px base unit.
 - **Spacing**: `--space-1` between options.
 - **States**: default, hover, active, focus; active option is reflected by
   `aria-pressed` and status color.
-- **Accessibility**: a native `radiogroup` exposes each option as `role=radio`
+- **Accessibility**: a `radiogroup` exposes each native button option as `role=radio`
   with `aria-checked`, clear Korean labels, and keyboard shortcuts `1/2/3`;
   the user-facing numbers intentionally map to data values `0/1/2`.
 - **Motion**: tactile `transform` press feedback only; reduced motion removes
@@ -123,13 +128,15 @@ All spacing derives from a 4px base unit.
 
 ### Session autosave child
 
-- **Structure**: headless `SessionAutosave` as the final child of the labeler
-  shell, receiving project/config/image/session state.
+- **Structure**: `SessionAutosave` is the final child of the labeler shell and
+  receives project/config/image/session state; its status chip is portalled into
+  the sidebar header so it stays visible without covering annotation controls.
 - **Variants**: new labeling run and resumed run with restored session metadata.
 - **Spacing**: no visual footprint.
-- **States**: idle, debounced save, page-hide flush.
-- **Accessibility**: no focusable or visible controls; persistence does not
-  change the direct sidebar/main/inspector child order.
+- **States**: idle, debounced save, saved, save failure, page-hide flush.
+- **Accessibility**: a polite status reports saves and an assertive alert warns
+  on failure; persistence does not change the direct sidebar/main/inspector
+  child order.
 - **Motion**: none.
 - **Layout**: shell integration only; no scroll owner.
 
@@ -145,9 +152,10 @@ are immediate so annotation state never feels delayed. `prefers-reduced-motion:
 reduce` disables the micro press transform.
 
 The visibility control adapts the beui.dev Radio Group mechanism: one active
-choice is represented by a native button with `aria-pressed`, while the
-project's simpler CSS implementation avoids adding a motion dependency. The
-interaction is intentionally instant because this is a precision tool.
+choice is represented by a native button exposed as `role=radio` with
+`aria-checked`, while the project's simpler CSS implementation avoids adding a
+motion dependency. The interaction is intentionally instant because this is a
+precision tool.
 
 ## 7. Depth & Surface
 
