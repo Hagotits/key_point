@@ -49,6 +49,14 @@ const VISIBILITY_OPTIONS = [
   { shortcut: '3', value: 2, label: '보임' },
 ]
 const VISIBILITY_BY_SHORTCUT = { 1: 0, 2: 1, 3: 2 }
+const histories = new WeakMap()
+
+function getHistory(owner, initialState) {
+  if (!histories.has(owner)) {
+    histories.set(owner, createHistory(initialState, { limit: 100 }))
+  }
+  return histories.get(owner)
+}
 
 export default function Labeler({
   projectName,
@@ -82,12 +90,10 @@ export default function Labeler({
   const importRef = useRef(null)
   const wrapRef = useRef(null)
   const holderRef = useRef(null)
-  if (!dragRef.history) {
-    dragRef.history = createHistory(annotations, { limit: 100 })
-  }
-  const history = dragRef.history
+  const history = getHistory(setAnnotations, annotations)
 
   const image = images.find((im) => im.id === currentId) || images[0]
+  const imageId = image?.id
   const instances = annotations[image?.id] || []
   const scale = baseScale * view.z // 원본 좌표 → 화면 px 변환 배율
 
@@ -149,12 +155,12 @@ export default function Labeler({
   const setInstances = useCallback(
     (updater) => {
       setAnnotations((prev) => {
-        if (!image) return prev
-        const cur = prev[image.id] || []
-        return { ...prev, [image.id]: typeof updater === 'function' ? updater(cur) : updater }
+        if (!imageId) return prev
+        const cur = prev[imageId] || []
+        return { ...prev, [imageId]: typeof updater === 'function' ? updater(cur) : updater }
       })
     },
-    [image?.id]
+    [imageId]
   )
 
   const commitAnnotations = (next) => {
@@ -201,8 +207,9 @@ export default function Labeler({
   // v 값 변경. v=0이면 좌표를 null로 비우고, v>=1인데 좌표가 없으면 박스 중앙에 배치
   const setKpV = useCallback(
     (instId, defId, v) => {
-      commitInstances((cur) =>
-        cur.map((inst) => {
+      if (!imageId) return
+      setAnnotations((current) => {
+        const nextInstances = (current[imageId] || []).map((inst) => {
           if (inst.id !== instId) return inst
           return {
             ...inst,
@@ -215,19 +222,22 @@ export default function Labeler({
             }),
           }
         })
-      )
+        const next = { ...current, [imageId]: nextInstances }
+        if (!getHistory(setAnnotations, current).commit(next)) return current
+        return next
+      })
     },
-    [commitInstances]
+    [imageId]
   )
 
   const cycleKpV = useCallback(
     (instId, defId) => {
-      const inst = instances.find((i) => i.id === instId)
+      const inst = (annotations[imageId] || []).find((i) => i.id === instId)
       const k = inst?.keypoints.find((k) => k.defId === defId)
       if (!k) return
       setKpV(instId, defId, k.v === 2 ? 1 : k.v === 1 ? 0 : 2)
     },
-    [instances, setKpV]
+    [annotations, imageId, setKpV]
   )
 
   const startDrawBox = (e) => {
@@ -457,7 +467,13 @@ export default function Labeler({
       const key = e.key.toLowerCase()
       if ((e.metaKey || e.ctrlKey) && key === 'z') {
         e.preventDefault()
-        applyHistory(e.shiftKey ? 'redo' : 'undo')
+        const next = history[e.shiftKey ? 'redo' : 'undo']()
+        if (next !== undefined) {
+          setAnnotations(next)
+          setSelectedId(null)
+          setSelectedKp(null)
+          setPlacing(null)
+        }
         return
       }
       if (e.key === 'Escape') {
@@ -482,14 +498,22 @@ export default function Labeler({
         }
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
-        commitInstances((cur) => cur.filter((inst) => inst.id !== selectedId))
+        if (!imageId) return
+        setAnnotations((current) => {
+          const next = {
+            ...current,
+            [imageId]: (current[imageId] || []).filter((inst) => inst.id !== selectedId),
+          }
+          if (!history.commit(next)) return current
+          return next
+        })
         setSelectedId(null)
         setSelectedKp(null)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedKp, setInstances, setKpV, cycleKpV, applyHistory])
+  }, [cycleKpV, history, imageId, selectedId, selectedKp, setKpV])
 
   const exportJSON = () => {
     const nameOf = (id) => keypointDefs.find((d) => d.id === id)?.name
