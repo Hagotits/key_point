@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createHistory } from '../history.js'
 import { duplicateInstance } from '../duplicateInstance.js'
+import {
+  isNumpadVisibilityShortcut,
+  updateKeypointVisibility,
+  visibilityFromShortcut,
+} from '../visibility.js'
 import { uid, loadImageFiles } from '../utils'
 import SessionAutosave from './SessionAutosave'
 
@@ -49,7 +54,6 @@ const VISIBILITY_OPTIONS = [
   { shortcut: '2', value: 1, label: '가려짐' },
   { shortcut: '3', value: 2, label: '보임' },
 ]
-const VISIBILITY_BY_SHORTCUT = { 1: 0, 2: 1, 3: 2 }
 const histories = new WeakMap()
 
 function getHistory(owner, initialState) {
@@ -209,24 +213,16 @@ export default function Labeler({
   const setKpV = useCallback(
     (instId, defId, v) => {
       if (!imageId) return
-      setAnnotations((current) => {
-        const nextInstances = (current[imageId] || []).map((inst) => {
-          if (inst.id !== instId) return inst
-          return {
-            ...inst,
-            keypoints: inst.keypoints.map((k) => {
-              if (k.defId !== defId) return k
-              if (v === 0) return { ...k, v: 0, x: null, y: null }
-              if (k.x == null || k.y == null)
-                return { ...k, v, x: inst.x + inst.w / 2, y: inst.y + inst.h / 2 }
-              return { ...k, v }
-            }),
-          }
-        })
-        const next = { ...current, [imageId]: nextInstances }
-        if (!getHistory(setAnnotations, current).commit(next)) return current
-        return next
-      })
+      const currentHistory = getHistory(setAnnotations, {})
+      const next = updateKeypointVisibility(
+        currentHistory.getState(),
+        imageId,
+        instId,
+        defId,
+        v
+      )
+      if (!currentHistory.commit(next)) return
+      setAnnotations(next)
     },
     [imageId]
   )
@@ -483,7 +479,7 @@ export default function Labeler({
         return
       }
       if (selectedKp) {
-        const shortcutValue = VISIBILITY_BY_SHORTCUT[e.key]
+        const shortcutValue = visibilityFromShortcut(e)
         if (shortcutValue !== undefined) {
           setKpV(selectedKp.instId, selectedKp.defId, shortcutValue)
           e.preventDefault()
@@ -500,14 +496,13 @@ export default function Labeler({
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
         if (!imageId) return
-        setAnnotations((current) => {
-          const next = {
-            ...current,
-            [imageId]: (current[imageId] || []).filter((inst) => inst.id !== selectedId),
-          }
-          if (!history.commit(next)) return current
-          return next
-        })
+        const current = history.getState()
+        const next = {
+          ...current,
+          [imageId]: (current[imageId] || []).filter((inst) => inst.id !== selectedId),
+        }
+        if (!history.commit(next)) return
+        setAnnotations(next)
         setSelectedId(null)
         setSelectedKp(null)
       }
@@ -667,7 +662,7 @@ export default function Labeler({
   return (
     <div className="labeler">
       {/* 왼쪽: 이미지 목록 */}
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label="이미지 목록">
         <div className="sidebar-header">
           <h2 title={projectName}>{projectName}</h2>
           <button className="btn small" onClick={() => fileRef.current.click()}>
@@ -690,20 +685,23 @@ export default function Labeler({
           {images.map((im) => {
             const count = (annotations[im.id] || []).length
             return (
-              <li
-                key={im.id}
-                className={im.id === image.id ? 'active' : ''}
-                onClick={() => {
-                  setCurrentId(im.id)
-                  setSelectedId(null)
-                  setSelectedKp(null)
-                  setPlacing(null)
-                  setView({ z: 1, tx: 0, ty: 0 })
-                }}
-              >
-                <img src={im.url} alt="" />
-                <span className="image-name" title={im.name}>{im.name}</span>
-                {count > 0 && <span className="badge">{count}</span>}
+              <li key={im.id} className={im.id === image.id ? 'active' : ''}>
+                <button
+                  type="button"
+                  className="image-select"
+                  aria-pressed={im.id === image.id}
+                  onClick={() => {
+                    setCurrentId(im.id)
+                    setSelectedId(null)
+                    setSelectedKp(null)
+                    setPlacing(null)
+                    setView({ z: 1, tx: 0, ty: 0 })
+                  }}
+                >
+                  <img src={im.url} alt="" />
+                  <span className="image-name" title={im.name}>{im.name}</span>
+                  {count > 0 && <span className="badge">{count}</span>}
+                </button>
               </li>
             )
           })}
@@ -729,7 +727,7 @@ export default function Labeler({
       </aside>
 
       {/* 가운데: 캔버스 */}
-      <main className="canvas-area">
+      <main className="canvas-area" aria-label="라벨링 캔버스">
         <div className="canvas-toolbar">
           {placing ? (
             <span className="canvas-hint-text placing-hint">
@@ -867,6 +865,7 @@ export default function Labeler({
                     const def = keypointDefs.find((d) => d.id === k.defId)
                     const isSel =
                       selectedKp?.instId === inst.id && selectedKp?.defId === k.defId
+                    const labelOnLeft = k.x > image.width / 2
                     return (
                       <g key={k.defId}>
                         {isSel && (
@@ -907,13 +906,17 @@ export default function Labeler({
                             onPointerDown={(e) => startMovePoint(e, inst, k.defId)}
                           />
                         )}
-                        {(labelMode === 'all' || isSel) && (
+                        {(isSel || (labelMode === 'all' && !selectedKp)) && (
                           <text
                             className={`kp-label ${isSel ? 'selected' : ''}`}
-                            x={k.x + pointR * 1.4 + 2 / scale}
+                            x={
+                              k.x +
+                              (labelOnLeft ? -1 : 1) * (pointR * 1.4 + 2 / scale)
+                            }
                             y={k.y - pointR * 0.8 - 2 / scale}
                             fontSize={fontSize}
                             fill={def.color}
+                            textAnchor={labelOnLeft ? 'end' : 'start'}
                           >
                             {isSel ? `${def.name} · 객체 ${instanceIndex + 1}` : def.name}
                           </text>
@@ -967,7 +970,7 @@ export default function Labeler({
       </main>
 
       {/* 오른쪽: 키포인트 범례 + 인스턴스 목록 */}
-      <aside className="rightbar">
+      <aside className="rightbar" aria-label="객체 및 키포인트 검사기">
         <h3>기준 스켈레톤</h3>
         <svg className="tpl-preview" viewBox="0 0 400 400">
           {edges.map(([a, b]) => {
@@ -1040,6 +1043,7 @@ export default function Labeler({
                           aria-label={`${def.name}: ${option.shortcut} ${V_LABELS[option.value]}`}
                           title={`단축키 ${option.shortcut}: ${V_LABELS[option.value]}`}
                           onKeyDown={(event) => {
+                            if (isNumpadVisibilityShortcut(event)) return
                             const keys = ['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Home', 'End']
                             if (!keys.includes(event.key)) return
                             event.preventDefault()

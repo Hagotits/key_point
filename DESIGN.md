@@ -22,12 +22,12 @@ against the cool graphite workspace.
 | Muted text | `--muted` | `#9aa1ad` | Hints and metadata |
 | Accent | `--accent` | `#4f8cff` | Interactive focus and active image |
 | Selection | `--selection` | `#ffd166` | Active object/keypoint identity |
-| Danger | `--danger` | `#e5534b` | Delete and destructive actions |
+| Danger | `--danger` | `#ff6b6b` | Delete and destructive actions |
 | Skeleton line | `--skeleton` | `#b8c1d1` | Neutral edge geometry |
 | Visible status | `--status-visible` | `#9ccc65` | `v=2`, 보임 |
 | Occluded status | `--status-occluded` | `#ffd166` | `v=1`, 가려짐 |
 | Absent status | `--status-absent` | `#78909c` | `v=0`, 없음 |
-| Control text | `--control-text` | `#16181d` | Text on status controls |
+| Control text | `--control-text` | `#16181d` | Text on status and filled accent controls |
 
 Accent is reserved for interaction. Selection is a distinct semantic signal,
 not decoration. Keypoint definition colors remain data-driven from the project
@@ -43,7 +43,7 @@ configuration.
 | Section | `--font-section` (`15px`) | 600 | 1.3 | Project name in rail |
 | Body | `--font-body` (`14px`) | 400 | 1.5 | Controls and rows |
 | Body small | `--font-small` (`13px`) | 400 | 1.45 | Section labels and legend |
-| Caption | `--font-caption` (`12px`) | 400 | 1.4 | Image names and hints |
+| Caption | `--font-caption` (`12px`) | 400 | 1.4 | Image names and compact metadata |
 | Micro | `--font-micro` (`11px`) | 600 | 1.3 | Status badges and compact actions |
 
 ### Font Stack
@@ -125,7 +125,7 @@ Corner geometry uses the named `--radius-xs` through `--radius-xl` scale.
 - **Variants**: `v=0`, `v=1`, `v=2`.
 - **Spacing**: `--space-1` between options.
 - **States**: default, hover, active, focus; active option is reflected by
-  `aria-pressed` and status color.
+  `aria-checked` and status color.
 - **Accessibility**: a `radiogroup` exposes each native button option as `role=radio`
   with `aria-checked`, clear Korean labels, and keyboard shortcuts `1/2/3`;
   the user-facing numbers intentionally map to data values `0/1/2`.
