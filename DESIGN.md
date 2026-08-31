@@ -74,6 +74,13 @@ exceptions because they encode annotation precision rather than layout rhythm.
 | `--space-6` | `24px` | Centered setup surface |
 | `--space-8` | `32px` | Setup card padding |
 
+Shared controls use semantic optical tokens for values that sit between the
+layout steps: `--control-gap-tight` (`2px`), `--control-gap-compact` (`3px`),
+`--control-pad-block` (`9px`), `--control-pad-small-block` (`5px`),
+`--control-pad-tiny-block` (`2px`), `--control-pad-compact-inline` (`5px`),
+`--list-row-pad-block` (`7px`), and the compact badge padding tokens.
+Corner geometry uses the named `--radius-xs` through `--radius-xl` scale.
+
 ### Grid
 
 - Wide shell: `230px` image rail, fluid canvas, `260px` inspector.
