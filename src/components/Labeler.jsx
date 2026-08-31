@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createHistory } from '../history.js'
 import { uid, loadImageFiles } from '../utils'
+import SessionAutosave from './SessionAutosave'
 
 // 설정 단계에서 그린 기준 스켈레톤 모양을 bbox 안에 맞춰 초기 배치.
 // 드래그 방향(4방향 스냅)에 맞춰 회전: 드래그 시작 지점이 템플릿의 위쪽(예: 머리)이 된다.
@@ -41,11 +43,28 @@ function layoutKeypoints(defs, box, delta = { x: 0, y: 1 }) {
 }
 
 const V_LABELS = { 2: '보임', 1: '가려짐', 0: '없음' }
+const VISIBILITY_OPTIONS = [
+  { shortcut: '1', value: 0, label: '없음' },
+  { shortcut: '2', value: 1, label: '가려짐' },
+  { shortcut: '3', value: 2, label: '보임' },
+]
+const VISIBILITY_BY_SHORTCUT = { 1: 0, 2: 1, 3: 2 }
 
-
-export default function Labeler({ projectName, keypointDefs, edges, images, onAddImages }) {
-  const [currentId, setCurrentId] = useState(images[0]?.id)
-  const [annotations, setAnnotations] = useState({}) // imageId -> [instance]
+export default function Labeler({
+  projectName,
+  keypointDefs,
+  edges,
+  images,
+  onAddImages,
+  initialSession,
+}) {
+  const [currentId, setCurrentId] = useState(() => {
+    const restoredId = initialSession?.currentImageId
+    return images.some((im) => im.id === restoredId) ? restoredId : images[0]?.id ?? null
+  })
+  const [annotations, setAnnotations] = useState(
+    () => initialSession?.annotations || {}
+  ) // imageId -> [instance]
   const [selectedId, setSelectedId] = useState(null)
   const [selectedKp, setSelectedKp] = useState(null) // {instId, defId} 단축키 대상 포인트
   const [placing, setPlacing] = useState(null) // {instId, defId} v=0 포인트 다시 찍기 모드
@@ -63,6 +82,10 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
   const importRef = useRef(null)
   const wrapRef = useRef(null)
   const holderRef = useRef(null)
+  if (!dragRef.history) {
+    dragRef.history = createHistory(annotations, { limit: 100 })
+  }
+  const history = dragRef.history
 
   const image = images.find((im) => im.id === currentId) || images[0]
   const instances = annotations[image?.id] || []
@@ -126,12 +149,42 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
   const setInstances = useCallback(
     (updater) => {
       setAnnotations((prev) => {
+        if (!image) return prev
         const cur = prev[image.id] || []
         return { ...prev, [image.id]: typeof updater === 'function' ? updater(cur) : updater }
       })
     },
     [image?.id]
   )
+
+  const commitAnnotations = (next) => {
+    if (!history.commit(next)) return false
+    setAnnotations({ ...next })
+    return true
+  }
+
+  const commitCurrentAnnotations = () => {
+    setAnnotations((current) => {
+      if (!history.commit(current)) return current
+      return { ...current }
+    })
+  }
+
+  const commitInstances = (updater) => {
+    if (!image) return false
+    const current = annotations[image.id] || []
+    const nextInstances = typeof updater === 'function' ? updater(current) : updater
+    return commitAnnotations({ ...annotations, [image.id]: nextInstances })
+  }
+
+  const applyHistory = (operation) => {
+    const next = history[operation]()
+    if (next === undefined) return
+    setAnnotations(next)
+    setSelectedId(null)
+    setSelectedKp(null)
+    setPlacing(null)
+  }
 
   // 클라이언트 좌표 → 이미지 원본 좌표
   const toImageCoords = (e) => {
@@ -148,7 +201,7 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
   // v 값 변경. v=0이면 좌표를 null로 비우고, v>=1인데 좌표가 없으면 박스 중앙에 배치
   const setKpV = useCallback(
     (instId, defId, v) => {
-      setInstances((cur) =>
+      commitInstances((cur) =>
         cur.map((inst) => {
           if (inst.id !== instId) return inst
           return {
@@ -164,7 +217,7 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
         })
       )
     },
-    [setInstances]
+    [commitInstances]
   )
 
   const cycleKpV = useCallback(
@@ -192,7 +245,7 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
       const { instId, defId } = placing
       const x = clamp(p.x, 0, image.width)
       const y = clamp(p.y, 0, image.height)
-      setInstances((cur) =>
+      commitInstances((cur) =>
         cur.map((inst) =>
           inst.id === instId
             ? {
@@ -377,7 +430,11 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
   const onPointerUp = () => {
     const drag = dragRef.current
     dragRef.current = null
-    if (drag?.mode !== 'draw') return
+    if (!drag) return
+    if (drag.mode !== 'draw') {
+      if (['move', 'resize', 'point'].includes(drag.mode)) commitCurrentAnnotations()
+      return
+    }
     // 너무 작은 박스(클릭 수준)는 무시
     if (draft && draft.w > 8 / scale && draft.h > 8 / scale) {
       const delta = drag.last
@@ -388,24 +445,31 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
         ...draft,
         keypoints: layoutKeypoints(keypointDefs, draft, delta),
       }
-      setInstances((cur) => [...cur, inst])
+      commitInstances((cur) => [...cur, inst])
       setSelectedId(inst.id)
     }
     setDraft(null)
   }
 
-  // 단축키: 0/1/2 = 선택 포인트 가시성 지정, V = 순환, Delete = 포인트 v=0 또는 박스 삭제
   useEffect(() => {
     const onKey = (e) => {
-      if (e.target.tagName === 'INPUT') return
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return
+      const key = e.key.toLowerCase()
+      if ((e.metaKey || e.ctrlKey) && key === 'z') {
+        e.preventDefault()
+        applyHistory(e.shiftKey ? 'redo' : 'undo')
+        return
+      }
       if (e.key === 'Escape') {
         setPlacing(null)
         setSelectedKp(null)
         return
       }
       if (selectedKp) {
-        if (['0', '1', '2'].includes(e.key)) {
-          setKpV(selectedKp.instId, selectedKp.defId, Number(e.key))
+        const shortcutValue = VISIBILITY_BY_SHORTCUT[e.key]
+        if (shortcutValue !== undefined) {
+          setKpV(selectedKp.instId, selectedKp.defId, shortcutValue)
+          e.preventDefault()
           return
         }
         if (e.key === 'v' || e.key === 'V') {
@@ -418,14 +482,14 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
         }
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
-        setInstances((cur) => cur.filter((inst) => inst.id !== selectedId))
+        commitInstances((cur) => cur.filter((inst) => inst.id !== selectedId))
         setSelectedId(null)
         setSelectedKp(null)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, selectedKp, setInstances, setKpV, cycleKpV])
+  }, [selectedId, selectedKp, setInstances, setKpV, cycleKpV, applyHistory])
 
   const exportJSON = () => {
     const nameOf = (id) => keypointDefs.find((d) => d.id === id)?.name
@@ -555,7 +619,7 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
       count++
     }
 
-    setAnnotations((prev) => ({ ...prev, ...imported }))
+    commitAnnotations({ ...annotations, ...imported })
     let msg = `${count}개 이미지의 어노테이션을 불러왔습니다.`
     if (skippedImages.length)
       msg += `\n\n업로드된 이미지 중에 없어서 건너뜀: ${skippedImages.slice(0, 5).join(', ')}${skippedImages.length > 5 ? ` 외 ${skippedImages.length - 5}건` : ''}`
@@ -572,6 +636,8 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
   const edgeW = Math.max(0.5, pointSize * 0.6) / scale
   // 포인트 크기에 비례해 이름 글씨도 함께 줄어든다
   const fontSize = Math.min(13, pointSize * 2.2) / scale
+  const selectedInstance = instances.find((inst) => inst.id === selectedId)
+  const selectedInstanceIndex = instances.findIndex((inst) => inst.id === selectedId)
 
   return (
     <div className="labeler">
@@ -617,9 +683,14 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
             )
           })}
         </ul>
-        <button className="btn export" onClick={() => importRef.current.click()}>
-          JSON 불러오기
-        </button>
+        <div className="sidebar-actions">
+          <button className="btn export" onClick={() => importRef.current.click()}>
+            JSON 불러오기
+          </button>
+          <button className="btn primary" onClick={exportJSON}>
+            JSON 내보내기
+          </button>
+        </div>
         <input
           ref={importRef}
           type="file"
@@ -630,9 +701,6 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
             e.target.value = ''
           }}
         />
-        <button className="btn primary" onClick={exportJSON}>
-          JSON 내보내기
-        </button>
       </aside>
 
       {/* 가운데: 캔버스 */}
@@ -647,10 +715,30 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
           ) : (
             <span className="canvas-hint-text">
               드래그 = 박스 그리기 (시작 지점이 스켈레톤 위쪽) · <b>휠</b> = 줌 ·{' '}
-              <b>Space/휠버튼 드래그</b> = 화면 이동 · 포인트 클릭 후 <b>0/1/2</b> = 가시성
-              (2 보임 · 1 가려짐 · 0 없음), <b>V</b> = 순환 · Delete = 포인트 v=0 / 박스 삭제
+              <b>Space/휠버튼 드래그</b> = 화면 이동 · 포인트 클릭 후 <b>1</b> 없음 ·{' '}
+              <b>2</b> 가려짐 · <b>3</b> 보임 · <b>V</b> = 순환 · Delete = 포인트 없음 / 박스 삭제
             </span>
           )}
+          <div className="history-controls" aria-label="편집 기록">
+            <button
+              type="button"
+              className="btn tiny"
+              disabled={!history.canUndo()}
+              onClick={() => applyHistory('undo')}
+              title="Cmd/Ctrl+Z"
+            >
+              실행 취소
+            </button>
+            <button
+              type="button"
+              className="btn tiny"
+              disabled={!history.canRedo()}
+              onClick={() => applyHistory('redo')}
+              title="Cmd/Ctrl+Shift+Z"
+            >
+              다시 실행
+            </button>
+          </div>
           <span className="point-size-control" title="마우스 휠로 확대/축소">
             <span>줌 {Math.round(view.z * 100)}%</span>
             {view.z !== 1 && (
@@ -702,7 +790,7 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
             >
-              {instances.map((inst) => (
+              {instances.map((inst, instanceIndex) => (
                 <g key={inst.id}>
                   <rect
                     className={`bbox ${inst.id === selectedId ? 'selected' : ''}`}
@@ -713,6 +801,16 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
                     strokeWidth={strokeW}
                     onPointerDown={(e) => startMoveBox(e, inst)}
                   />
+                  {inst.id === selectedId && (
+                    <text
+                      className="object-label"
+                      x={inst.x + 6 / scale}
+                      y={Math.max(14 / scale, inst.y - 6 / scale)}
+                      fontSize={Math.max(11 / scale, fontSize)}
+                    >
+                      객체 {instanceIndex + 1}
+                    </text>
+                  )}
                   {edges.map(([a, b]) => {
                     const ka = inst.keypoints.find((k) => k.defId === a)
                     const kb = inst.keypoints.find((k) => k.defId === b)
@@ -740,6 +838,14 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
                       selectedKp?.instId === inst.id && selectedKp?.defId === k.defId
                     return (
                       <g key={k.defId}>
+                        {isSel && (
+                          <circle
+                            className="keypoint-selection-ring"
+                            cx={k.x}
+                            cy={k.y}
+                            r={Math.max(pointR * 2.1, 12 / scale)}
+                          />
+                        )}
                         {/* 포인트가 작아도 잡기 쉽게 투명한 히트 영역을 겹침 */}
                         <circle
                           className="keypoint-hit"
@@ -770,15 +876,15 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
                             onPointerDown={(e) => startMovePoint(e, inst, k.defId)}
                           />
                         )}
-                        {(labelMode === 'all' || (labelMode === 'selected' && isSel)) && (
+                        {(labelMode === 'all' || isSel) && (
                           <text
-                            className="kp-label"
+                            className={`kp-label ${isSel ? 'selected' : ''}`}
                             x={k.x + pointR * 1.4 + 2 / scale}
                             y={k.y - pointR * 0.8 - 2 / scale}
                             fontSize={fontSize}
                             fill={def.color}
                           >
-                            {def.name}
+                            {isSel ? `${def.name} · 객체 ${instanceIndex + 1}` : def.name}
                           </text>
                         )}
                       </g>
@@ -850,7 +956,7 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
             )
           })}
           {keypointDefs.map((d) => (
-            <circle key={d.id} cx={d.tx} cy={d.ty} r={9} fill={d.color} stroke="#fff" strokeWidth={2} />
+            <circle key={d.id} cx={d.tx} cy={d.ty} r={9} fill={d.color} stroke="var(--text)" strokeWidth={2} />
           ))}
         </svg>
         <ul className="legend">
@@ -861,69 +967,100 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
             </li>
           ))}
         </ul>
-        {(() => {
-          const selInst = instances.find((i) => i.id === selectedId)
-          if (!selInst) return null
-          return (
-            <>
-              <h3>선택된 객체의 키포인트</h3>
-              <ul className="kp-status-list">
-                {selInst.keypoints.map((k) => {
-                  const def = keypointDefs.find((d) => d.id === k.defId)
-                  const isSel =
-                    selectedKp?.instId === selInst.id && selectedKp?.defId === k.defId
-                  return (
-                    <li
-                      key={k.defId}
-                      className={isSel ? 'active' : ''}
-                      onClick={() => setSelectedKp({ instId: selInst.id, defId: k.defId })}
+        {selectedInstance && (
+          <>
+            <div className="selection-banner">
+              <span className="selection-banner-title">선택된 객체</span>
+              <strong>객체 {selectedInstanceIndex + 1}</strong>
+              <span className="selection-banner-meta">
+                {selectedInstance.keypoints.filter((k) => k.v === 2).length} 보임 ·{' '}
+                {selectedInstance.keypoints.filter((k) => k.v === 1).length} 가려짐 ·{' '}
+                {selectedInstance.keypoints.filter((k) => k.v === 0).length} 없음
+              </span>
+            </div>
+            <h3>객체 {selectedInstanceIndex + 1}의 키포인트</h3>
+            <ul className="kp-status-list">
+              {selectedInstance.keypoints.map((k) => {
+                const def = keypointDefs.find((d) => d.id === k.defId)
+                const isSel =
+                  selectedKp?.instId === selectedInstance.id && selectedKp?.defId === k.defId
+                if (!def) return null
+                return (
+                  <li key={k.defId} className={isSel ? 'active' : ''}>
+                    <button
+                      type="button"
+                      className="kp-select"
+                      aria-pressed={isSel}
+                      onClick={() => setSelectedKp({ instId: selectedInstance.id, defId: k.defId })}
                     >
                       <span className="kp-dot" style={{ background: def.color }} />
                       <span className="kp-status-name">{def.name}</span>
-                      {k.v === 0 && (
+                    </button>
+                    <div className="visibility-options" role="radiogroup" aria-label={`${def.name} 가시성`}>
+                      {VISIBILITY_OPTIONS.map((option) => (
                         <button
-                          className="btn tiny"
-                          title="캔버스를 클릭해 이 포인트를 다시 찍습니다"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPlacing({ instId: selInst.id, defId: k.defId })
+                          key={option.value}
+                          type="button"
+                          role="radio"
+                          className={`visibility-option v${option.value} ${k.v === option.value ? 'active' : ''}`}
+                          aria-checked={k.v === option.value}
+                          aria-label={`${def.name}: ${option.shortcut} ${V_LABELS[option.value]}`}
+                          title={`단축키 ${option.shortcut}: ${V_LABELS[option.value]}`}
+                          onClick={() => {
+                            setSelectedKp({ instId: selectedInstance.id, defId: k.defId })
+                            setKpV(selectedInstance.id, k.defId, option.value)
                           }}
                         >
-                          찍기
+                          <span className="visibility-shortcut">{option.shortcut}</span>
+                          <span>{option.label}</span>
                         </button>
-                      )}
+                      ))}
+                    </div>
+                    {k.v === 0 && (
                       <button
-                        className={`v-badge v${k.v}`}
-                        title="클릭하면 보임 → 가려짐 → 없음 순환"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          cycleKpV(selInst.id, k.defId)
+                        type="button"
+                        className="btn tiny place-btn"
+                        title="캔버스를 클릭해 이 포인트를 다시 찍습니다"
+                        onClick={() => {
+                          setSelectedKp({ instId: selectedInstance.id, defId: k.defId })
+                          setPlacing({ instId: selectedInstance.id, defId: k.defId })
                         }}
                       >
-                        {k.v} {V_LABELS[k.v]}
+                        찍기
                       </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            </>
-          )
-        })()}
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </>
+        )}
         <h3>이 이미지의 객체 ({instances.length})</h3>
         <ul className="instance-list">
           {instances.map((inst, i) => (
-            <li
-              key={inst.id}
-              className={inst.id === selectedId ? 'active' : ''}
-              onClick={() => setSelectedId(inst.id)}
-            >
-              <span>객체 {i + 1}</span>
+            <li key={inst.id} className={inst.id === selectedId ? 'active' : ''}>
               <button
+                type="button"
+                className="instance-select"
+                aria-pressed={inst.id === selectedId}
+                onClick={() => {
+                  setSelectedId(inst.id)
+                  setSelectedKp(null)
+                }}
+              >
+                <span className="instance-index">{i + 1}</span>
+                <span>객체 {i + 1}</span>
+              </button>
+              <button
+                type="button"
                 className="btn tiny danger"
                 onClick={(e) => {
                   e.stopPropagation()
-                  setInstances((cur) => cur.filter((x) => x.id !== inst.id))
-                  if (selectedId === inst.id) setSelectedId(null)
+                  commitInstances((cur) => cur.filter((x) => x.id !== inst.id))
+                  if (selectedId === inst.id) {
+                    setSelectedId(null)
+                    setSelectedKp(null)
+                  }
                 }}
               >
                 삭제
@@ -932,6 +1069,15 @@ export default function Labeler({ projectName, keypointDefs, edges, images, onAd
           ))}
         </ul>
       </aside>
+      <SessionAutosave
+        initialSession={initialSession}
+        projectName={projectName}
+        keypointDefs={keypointDefs}
+        edges={edges}
+        images={images}
+        annotations={annotations}
+        currentImageId={currentId}
+      />
     </div>
   )
 }
