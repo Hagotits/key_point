@@ -794,16 +794,6 @@ export default function Labeler({
               <span className="hint-chunk">· Delete = 포인트 없음 / 박스 삭제</span>
             </span>
           )}
-          {hasLegacyInstances && (
-            <button
-              type="button"
-              className="btn tiny"
-              onClick={correctLegacyGeometry}
-              title="이전 화면 배치에서 어긋난 현재 이미지의 객체 위치를 보정합니다. Cmd/Ctrl+Z로 되돌릴 수 있습니다."
-            >
-              이전 위치 보정
-            </button>
-          )}
           <div className="history-controls" aria-label="편집 기록">
             <button
               type="button"
@@ -1155,6 +1145,16 @@ export default function Labeler({
               })}
             </ul>
           </>
+        )}
+        {hasLegacyInstances && (
+          <button
+            type="button"
+            className="btn small"
+            onClick={correctLegacyGeometry}
+            title="이전 화면 배치에서 어긋난 현재 이미지의 객체 위치를 보정합니다. Cmd/Ctrl+Z로 되돌릴 수 있습니다."
+          >
+            이전 위치 보정
+          </button>
         )}
         <h3>이 이미지의 객체 ({instances.length})</h3>
         <ul className="instance-list">
