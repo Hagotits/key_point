@@ -116,6 +116,7 @@ export default function Labeler({
   const imageId = image?.id
   const instances = annotations[image?.id] || []
   const canvasInstances = selectVisibleInstances(instances, activeDrag)
+  const visibleInstanceIds = new Set(canvasInstances.map((instance) => instance.id))
   const hasLegacyInstances = instances.some(
     (instance) => instance.geometryVersion !== ANNOTATION_GEOMETRY_VERSION
   )
@@ -608,6 +609,7 @@ export default function Labeler({
         width: im.width,
         height: im.height,
         annotations: (annotations[im.id] || []).map((inst) => ({
+          geometryVersion: inst.geometryVersion,
           bbox: [
             Math.round(inst.x),
             Math.round(inst.y),
@@ -666,6 +668,9 @@ export default function Labeler({
         }
         return {
           id: uid(),
+          ...(a.geometryVersion === ANNOTATION_GEOMETRY_VERSION
+            ? { geometryVersion: ANNOTATION_GEOMETRY_VERSION }
+            : {}),
           x: a.bbox?.[0] ?? 0,
           y: a.bbox?.[1] ?? 0,
           w: a.bbox?.[2] ?? 0,
@@ -869,8 +874,8 @@ export default function Labeler({
               onPointerCancel={onPointerCancel}
               onLostPointerCapture={onPointerCancel}
             >
-              {canvasInstances.map((inst) => {
-                const instanceIndex = instances.indexOf(inst)
+              {instances.map((inst, instanceIndex) => {
+                if (!visibleInstanceIds.has(inst.id)) return null
                 return (
                 <g key={inst.id}>
                   <rect
