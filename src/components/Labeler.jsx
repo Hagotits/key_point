@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createHistory } from '../history.js'
 import { duplicateInstance } from '../duplicateInstance.js'
 import {
@@ -6,7 +6,7 @@ import {
   updateKeypointVisibility,
   visibilityFromShortcut,
 } from '../visibility.js'
-import { uid, loadImageFiles } from '../utils'
+import { fitImageSize, uid, loadImageFiles } from '../utils'
 import SessionAutosave from './SessionAutosave'
 
 // 설정 단계에서 그린 기준 스켈레톤 모양을 bbox 안에 맞춰 초기 배치.
@@ -87,9 +87,9 @@ export default function Labeler({
   const [spacePan, setSpacePan] = useState(false) // Space 누른 상태 = 드래그로 화면 이동
   const [pointSize, setPointSize] = useState(4) // 키포인트 반지름 (화면 px 기준)
   const [labelMode, setLabelMode] = useState('all') // 이름 표시: all | selected | none
+  const [fitSize, setFitSize] = useState({ width: 0, height: 0 })
 
   const svgRef = useRef(null)
-  const imgRef = useRef(null)
   const dragRef = useRef(null)
   const fileRef = useRef(null)
   const importRef = useRef(null)
@@ -102,16 +102,27 @@ export default function Labeler({
   const instances = annotations[image?.id] || []
   const scale = baseScale * view.z // 원본 좌표 → 화면 px 변환 배율
 
-  // 화면 표시 배율 추적 (핸들/포인트 크기를 화면 기준으로 일정하게)
-  useEffect(() => {
-    const img = imgRef.current
-    if (!img || !image) return
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap || !image) return
     const update = () => {
-      if (img.clientWidth) setBaseScale(img.clientWidth / image.width)
+      const style = getComputedStyle(wrap)
+      const bounds = {
+        width: wrap.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        height: wrap.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+      }
+      const next = fitImageSize(image, bounds)
+      if (next.scale <= 0) return
+      setBaseScale(next.scale)
+      setFitSize((current) =>
+        current.width === next.width && current.height === next.height
+          ? current
+          : { width: next.width, height: next.height }
+      )
     }
     update()
     const ro = new ResizeObserver(update)
-    ro.observe(img)
+    ro.observe(wrap)
     return () => ro.disconnect()
   }, [image])
 
@@ -806,11 +817,13 @@ export default function Labeler({
             className="image-holder"
             ref={holderRef}
             style={{
+              width: `${fitSize.width}px`,
+              height: `${fitSize.height}px`,
               transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.z})`,
               transformOrigin: '0 0',
             }}
           >
-            <img ref={imgRef} src={image.url} alt={image.name} draggable={false} />
+            <img src={image.url} alt={image.name} draggable={false} />
             <svg
               ref={svgRef}
               viewBox={`0 0 ${image.width} ${image.height}`}
