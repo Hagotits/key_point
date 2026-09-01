@@ -164,6 +164,12 @@ choice is represented by a native button exposed as `role=radio` with
 motion dependency. The interaction is intentionally instant because this is a
 precision tool.
 
+Bounding-box creation uses a precision-canvas modifier with no catalog motion
+equivalent: a normal drag edits the annotation under the pointer, while
+`Shift+drag` deliberately draws a new box through overlapping boxes and
+keypoints. Space+drag and middle-button drag retain priority for panning. The
+gesture is immediate and introduces no animation.
+
 ## 7. Depth & Surface
 
 ### Strategy: mixed

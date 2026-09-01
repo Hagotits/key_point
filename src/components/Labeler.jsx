@@ -6,6 +6,7 @@ import {
 import { createHistory } from '../history.js'
 import { duplicateInstance } from '../duplicateInstance.js'
 import { selectVisibleInstances } from '../dragVisibility.js'
+import { resolveAnnotationPointerAction } from '../pointerInteraction.js'
 import {
   isNumpadVisibilityShortcut,
   updateKeypointVisibility,
@@ -310,7 +311,20 @@ export default function Labeler({
     svgRef.current.setPointerCapture(e.pointerId)
   }
 
+  const routeAnnotationPointer = (e) => {
+    const action = resolveAnnotationPointerAction({
+      button: e.button,
+      shiftKey: e.shiftKey,
+      spacePan,
+    })
+    if (action === 'edit') return false
+    e.stopPropagation()
+    if (action === 'draw' || action === 'pan') startDrawBox(e)
+    return true
+  }
+
   const startMoveBox = (e, inst) => {
+    if (routeAnnotationPointer(e)) return
     if (e.button !== 0) return
     e.stopPropagation()
     const p = toImageCoords(e)
@@ -333,6 +347,7 @@ export default function Labeler({
   }
 
   const startResize = (e, inst, handle) => {
+    if (routeAnnotationPointer(e)) return
     if (e.button !== 0) return
     e.stopPropagation()
     dragRef.current = {
@@ -348,6 +363,7 @@ export default function Labeler({
   }
 
   const startMovePoint = (e, inst, defId) => {
+    if (routeAnnotationPointer(e)) return
     if (e.button !== 0) return
     e.stopPropagation()
     const p = toImageCoords(e)
@@ -790,6 +806,7 @@ export default function Labeler({
             <span className="canvas-hint-text">
               <span className="hint-chunk">드래그 = 박스 그리기</span>
               <span className="hint-chunk">(시작 지점이 스켈레톤 위쪽)</span>
+              <span className="hint-chunk">· <b>Shift+드래그</b> = 겹친 곳에 새 박스</span>
               <span className="hint-chunk">· <b>휠</b> = 줌</span>
               <span className="hint-chunk">· <b>Space/휠버튼 드래그</b> = 화면 이동</span>
               <span className="hint-chunk">· 포인트 클릭 후 <b>1</b> 없음</span>
