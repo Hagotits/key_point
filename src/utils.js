@@ -22,6 +22,7 @@ export function loadImageFiles(fileList) {
               id: uid(),
               name: file.webkitRelativePath || file.name,
               url,
+              blob: file,
               width: img.naturalWidth,
               height: img.naturalHeight,
             })
@@ -33,4 +34,14 @@ export function loadImageFiles(fileList) {
         })
     )
   ).then((results) => results.filter(Boolean))
+}
+
+export function restoreImageAssets(images) {
+  return (Array.isArray(images) ? images : []).map((image) => ({
+    ...image,
+    url:
+      image.blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+        ? URL.createObjectURL(image.blob)
+        : image.url || '',
+  }))
 }

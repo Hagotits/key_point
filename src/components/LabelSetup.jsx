@@ -126,7 +126,7 @@ export default function LabelSetup({ projectName, onDone }) {
 
         <section className="setup-section">
           <h2>1. 기준 스켈레톤 그리기</h2>
-          <p className="muted small">
+          <p className="muted small task-instruction">
             빈 곳 클릭 = 포인트 추가 (선택된 포인트에서 선이 자동으로 이어짐) · 포인트 클릭 =
             그 점을 선의 시작점으로 선택 (가지 치기) · 선 클릭 = 선 삭제 · Esc = 연결 끊고 새로
             시작 · 포인트 드래그 = 이동 · Delete = 선택 포인트 삭제
@@ -280,7 +280,7 @@ export default function LabelSetup({ projectName, onDone }) {
           라벨링 시작
         </button>
         {!ready && (
-          <p className="muted small">
+          <p className="muted small task-instruction">
             포인트를 1개 이상 찍고 이미지를 업로드하면 시작할 수 있습니다.
           </p>
         )}
