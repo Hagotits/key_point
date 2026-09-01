@@ -784,7 +784,7 @@ export default function Labeler({
             <span className="canvas-hint-text placing-hint">
               키포인트 위치 다시 지정:{' '}
               <b>{keypointDefs.find((d) => d.id === placing.defId)?.name}</b> — 원하는 위치를
-              클릭하세요 (Esc = 취소)
+              클릭하세요 <span className="hint-chunk">(Esc = 취소)</span>
             </span>
           ) : (
             <span className="canvas-hint-text">
