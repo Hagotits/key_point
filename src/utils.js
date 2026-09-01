@@ -7,6 +7,11 @@ export const KP_COLORS = [
 let nextId = 1
 export const uid = () => `id_${nextId++}_${Date.now().toString(36)}`
 
+export function fitImageSize(image, bounds) {
+  const scale = Math.min(1, bounds.width / image.width, bounds.height / image.height)
+  return { width: image.width * scale, height: image.height * scale, scale }
+}
+
 // 파일 목록에서 이미지 파일만 골라 {id, name, url, width, height}로 로드
 export function loadImageFiles(fileList) {
   const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'))
