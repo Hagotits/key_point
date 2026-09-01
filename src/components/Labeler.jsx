@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  ANNOTATION_GEOMETRY_VERSION,
+  convertLegacyInstances,
+} from '../annotationGeometry.js'
 import { createHistory } from '../history.js'
 import { duplicateInstance } from '../duplicateInstance.js'
+import { selectVisibleInstances } from '../dragVisibility.js'
 import {
   isNumpadVisibilityShortcut,
   updateKeypointVisibility,
@@ -63,6 +68,15 @@ function getHistory(owner, initialState) {
   return histories.get(owner)
 }
 
+function getContentBounds(element) {
+  const style = getComputedStyle(element)
+  return {
+    width: element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+    height: element.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+  }
+}
+
+// allow: SIZE_OK — this existing component is the shared state machine for one labeling surface.
 export default function Labeler({
   projectName,
   keypointDefs,
@@ -82,6 +96,7 @@ export default function Labeler({
   const [selectedKp, setSelectedKp] = useState(null) // {instId, defId} 단축키 대상 포인트
   const [placing, setPlacing] = useState(null) // {instId, defId} v=0 포인트 다시 찍기 모드
   const [draft, setDraft] = useState(null) // 그리는 중인 bbox
+  const [activeDrag, setActiveDrag] = useState(null)
   const [baseScale, setBaseScale] = useState(1) // 이미지 원본 대비 화면 표시 배율 (줌 제외)
   const [view, setView] = useState({ z: 1, tx: 0, ty: 0 }) // 줌 배율 + 이동량(화면 px)
   const [spacePan, setSpacePan] = useState(false) // Space 누른 상태 = 드래그로 화면 이동
@@ -100,17 +115,17 @@ export default function Labeler({
   const image = images.find((im) => im.id === currentId) || images[0]
   const imageId = image?.id
   const instances = annotations[image?.id] || []
+  const canvasInstances = selectVisibleInstances(instances, activeDrag)
+  const hasLegacyInstances = instances.some(
+    (instance) => instance.geometryVersion !== ANNOTATION_GEOMETRY_VERSION
+  )
   const scale = baseScale * view.z // 원본 좌표 → 화면 px 변환 배율
 
   useLayoutEffect(() => {
     const wrap = wrapRef.current
     if (!wrap || !image) return
     const update = () => {
-      const style = getComputedStyle(wrap)
-      const bounds = {
-        width: wrap.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
-        height: wrap.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
-      }
+      const bounds = getContentBounds(wrap)
       const next = fitImageSize(image, bounds)
       if (next.scale <= 0) return
       setBaseScale(next.scale)
@@ -199,6 +214,12 @@ export default function Labeler({
     return commitAnnotations({ ...annotations, [image.id]: nextInstances })
   }
 
+  const correctLegacyGeometry = () => {
+    const wrap = wrapRef.current
+    if (!wrap || !image) return
+    commitInstances((current) => convertLegacyInstances(current, image, getContentBounds(wrap)))
+  }
+
   const applyHistory = (operation) => {
     const next = history[operation]()
     if (next === undefined) return
@@ -281,6 +302,7 @@ export default function Labeler({
       return
     }
     dragRef.current = { mode: 'draw', start: p }
+    setActiveDrag(dragRef.current)
     setSelectedId(null)
     setSelectedKp(null)
     setDraft({ x: p.x, y: p.y, w: 0, h: 0 })
@@ -303,6 +325,7 @@ export default function Labeler({
         keypoints: inst.keypoints.map((k) => ({ ...k })),
       },
     }
+    setActiveDrag(dragRef.current)
     setSelectedId(inst.id)
     setSelectedKp(null)
     svgRef.current.setPointerCapture(e.pointerId)
@@ -318,6 +341,7 @@ export default function Labeler({
       start: toImageCoords(e),
       orig: { x: inst.x, y: inst.y, w: inst.w, h: inst.h, keypoints: inst.keypoints.map((k) => ({ ...k })) },
     }
+    setActiveDrag(dragRef.current)
     setSelectedId(inst.id)
     svgRef.current.setPointerCapture(e.pointerId)
   }
@@ -335,6 +359,7 @@ export default function Labeler({
       offX: (k?.x ?? p.x) - p.x,
       offY: (k?.y ?? p.y) - p.y,
     }
+    setActiveDrag(dragRef.current)
     setSelectedId(inst.id)
     setSelectedKp({ instId: inst.id, defId })
     svgRef.current.setPointerCapture(e.pointerId)
@@ -448,6 +473,7 @@ export default function Labeler({
   const onPointerUp = () => {
     const drag = dragRef.current
     dragRef.current = null
+    setActiveDrag(null)
     if (!drag) return
     if (drag.mode !== 'draw') {
       if (['move', 'resize', 'point'].includes(drag.mode)) commitCurrentAnnotations()
@@ -461,12 +487,21 @@ export default function Labeler({
       const inst = {
         id: uid(),
         ...draft,
+        geometryVersion: ANNOTATION_GEOMETRY_VERSION,
         keypoints: layoutKeypoints(keypointDefs, draft, delta),
       }
       commitInstances((cur) => [...cur, inst])
       setSelectedId(inst.id)
     }
     setDraft(null)
+  }
+
+  const onPointerCancel = () => {
+    const drag = dragRef.current
+    dragRef.current = null
+    setActiveDrag(null)
+    setDraft(null)
+    if (drag && ['move', 'resize', 'point'].includes(drag.mode)) commitCurrentAnnotations()
   }
 
   useEffect(() => {
@@ -742,7 +777,7 @@ export default function Labeler({
         <div className="canvas-toolbar">
           {placing ? (
             <span className="canvas-hint-text placing-hint">
-              포인트 다시 찍기:{' '}
+              키포인트 위치 다시 지정:{' '}
               <b>{keypointDefs.find((d) => d.id === placing.defId)?.name}</b> — 원하는 위치를
               클릭하세요 (Esc = 취소)
             </span>
@@ -758,6 +793,16 @@ export default function Labeler({
               <span className="hint-chunk">· <b>V</b> = 순환</span>
               <span className="hint-chunk">· Delete = 포인트 없음 / 박스 삭제</span>
             </span>
+          )}
+          {hasLegacyInstances && (
+            <button
+              type="button"
+              className="btn tiny"
+              onClick={correctLegacyGeometry}
+              title="이전 화면 배치에서 어긋난 현재 이미지의 객체 위치를 보정합니다. Cmd/Ctrl+Z로 되돌릴 수 있습니다."
+            >
+              이전 위치 보정
+            </button>
           )}
           <div className="history-controls" aria-label="편집 기록">
             <button
@@ -831,8 +876,12 @@ export default function Labeler({
               onPointerDown={startDrawBox}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
+              onPointerCancel={onPointerCancel}
+              onLostPointerCapture={onPointerCancel}
             >
-              {instances.map((inst, instanceIndex) => (
+              {canvasInstances.map((inst) => {
+                const instanceIndex = instances.indexOf(inst)
+                return (
                 <g key={inst.id}>
                   <rect
                     className={`bbox ${inst.id === selectedId ? 'selected' : ''}`}
@@ -966,7 +1015,8 @@ export default function Labeler({
                       ))
                     })()}
                 </g>
-              ))}
+                )
+              })}
               {draft && (
                 <rect
                   className="bbox draft"
@@ -1091,13 +1141,13 @@ export default function Labeler({
                       <button
                         type="button"
                         className="btn tiny place-btn"
-                        title="캔버스를 클릭해 이 포인트를 다시 찍습니다"
+                        title="캔버스에서 이 키포인트의 위치를 다시 지정합니다"
                         onClick={() => {
                           setSelectedKp({ instId: selectedInstance.id, defId: k.defId })
                           setPlacing({ instId: selectedInstance.id, defId: k.defId })
                         }}
                       >
-                        찍기
+                        위치 다시 지정
                       </button>
                     )}
                   </li>
